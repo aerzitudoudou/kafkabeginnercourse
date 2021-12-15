@@ -1,5 +1,6 @@
 package com.consumer.elasticsearch.course.tutorial3;
 
+import com.google.gson.JsonParser;
 import org.apache.http.HttpHost;
 import org.apache.http.auth.AuthScope;
 import org.apache.http.auth.UsernamePasswordCredentials;
@@ -11,6 +12,7 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.serialization.StringDeserializer;
+import org.elasticsearch.action.bulk.BulkRequest;
 import org.elasticsearch.action.index.IndexRequest;
 import org.elasticsearch.action.index.IndexResponse;
 import org.elasticsearch.client.*;
@@ -60,6 +62,8 @@ public class ElasticSearchConsumer {
         properties.setProperty(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
         properties.setProperty(ConsumerConfig.GROUP_ID_CONFIG, groupId);
         properties.setProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        properties.setProperty(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");//disable auto commit of offsets
+        properties.setProperty(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, "10");//receive only 10 records at a time
 
         //create consumer
         KafkaConsumer<String, String> consumer = new KafkaConsumer<String, String>(properties);
@@ -70,7 +74,7 @@ public class ElasticSearchConsumer {
 //    private static JsonParser jsonParser = new JsonParser();
 
 
-    public static void main(String[] args) throws IOException {
+    public static void main(String[] args) throws IOException, InterruptedException {
         Logger logger = LoggerFactory.getLogger(ElasticSearchConsumer.class.getName());
         RestHighLevelClient client = createClient();
         //need to escape any double quotes if have double quotes outside
@@ -83,26 +87,53 @@ public class ElasticSearchConsumer {
         while(true){
             ConsumerRecords<String, String> records =
                     consumer.poll(Duration.ofMillis(100));
+
+            logger.info("Received " + records.count() + " records");
+            //BulkRequest bulkRequest = new BulkRequest();
+
             for(ConsumerRecord<String, String> record : records){
+                //two strategies to get a unique id for a unique tweet
+                //1. kafka generic id
+                //String id = record.topic() + record.partition() + record.offset();
+
+                //2. twitter specific feed id
+                String id = extractIdFromTweet(record.value());
+
                 //where we insert data into elastic search
                 String jsonString = record.value();
                 IndexRequest indexRequest = new IndexRequest("twitter")
-                        .source(jsonString, XContentType.JSON);
+                        .source(jsonString, XContentType.JSON)
+                        .id(id); //this is to make consumer idempotent
+                //bulkRequest.add(indexRequest);
                 IndexResponse indexResponse = client.index(indexRequest, RequestOptions.DEFAULT);
 
-                String id = indexResponse.getId();
-                logger.info(id);
+                logger.info(indexResponse.getId());
                 try {
-                    Thread.sleep(1000);
+                    Thread.sleep(10);
                 } catch (InterruptedException e) {
                     e.printStackTrace();
                 }
 
             }
+
+            logger.info("Committing offsets...");
+            consumer.commitSync();
+            logger.info("Offsets have been committed");
+            Thread.sleep(1000);
+
+
         }
         //close the client gracefully
         //client.close();
 
 
+    }
+
+    private static JsonParser jsonParser = new JsonParser();
+    private static String extractIdFromTweet(String tweetJson){
+        return jsonParser.parse(tweetJson)
+                .getAsJsonObject()
+                .get("id_str")
+                .getAsString();
     }
 }
