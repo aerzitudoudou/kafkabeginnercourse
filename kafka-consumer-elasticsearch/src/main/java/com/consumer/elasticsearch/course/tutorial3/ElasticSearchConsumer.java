@@ -13,6 +13,7 @@ import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.elasticsearch.action.bulk.BulkRequest;
+import org.elasticsearch.action.bulk.BulkResponse;
 import org.elasticsearch.action.index.IndexRequest;
 import org.elasticsearch.action.index.IndexResponse;
 import org.elasticsearch.client.*;
@@ -63,7 +64,7 @@ public class ElasticSearchConsumer {
         properties.setProperty(ConsumerConfig.GROUP_ID_CONFIG, groupId);
         properties.setProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         properties.setProperty(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");//disable auto commit of offsets
-        properties.setProperty(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, "10");//receive only 10 records at a time
+        properties.setProperty(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, "100");//receive only 10 records at a time
 
         //create consumer
         KafkaConsumer<String, String> consumer = new KafkaConsumer<String, String>(properties);
@@ -71,7 +72,6 @@ public class ElasticSearchConsumer {
 
         return consumer;
     }
-//    private static JsonParser jsonParser = new JsonParser();
 
 
     public static void main(String[] args) throws IOException, InterruptedException {
@@ -87,9 +87,9 @@ public class ElasticSearchConsumer {
         while(true){
             ConsumerRecords<String, String> records =
                     consumer.poll(Duration.ofMillis(100));
-
-            logger.info("Received " + records.count() + " records");
-            //BulkRequest bulkRequest = new BulkRequest();
+            int recordCounts = records.count();
+            logger.info("Received " + recordCounts + " records");
+            BulkRequest bulkRequest = new BulkRequest(); //to make to write to elastic search much quicker
 
             for(ConsumerRecord<String, String> record : records){
                 //two strategies to get a unique id for a unique tweet
@@ -97,29 +97,30 @@ public class ElasticSearchConsumer {
                 //String id = record.topic() + record.partition() + record.offset();
 
                 //2. twitter specific feed id
-                String id = extractIdFromTweet(record.value());
+                try{
+                    String id = extractIdFromTweet(record.value());
 
-                //where we insert data into elastic search
-                String jsonString = record.value();
-                IndexRequest indexRequest = new IndexRequest("twitter")
-                        .source(jsonString, XContentType.JSON)
-                        .id(id); //this is to make consumer idempotent
-                //bulkRequest.add(indexRequest);
-                IndexResponse indexResponse = client.index(indexRequest, RequestOptions.DEFAULT);
-
-                logger.info(indexResponse.getId());
-                try {
-                    Thread.sleep(10);
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
+                    //where we insert data into elastic search
+                    String jsonString = record.value();
+                    IndexRequest indexRequest = new IndexRequest("twitter")
+                            .source(jsonString, XContentType.JSON)
+                            .id(id); //this is to make consumer idempotent
+                    bulkRequest.add(indexRequest);//add to our bulk request
+                }catch(NullPointerException e){
+                    logger.warn("Skipping bad data: " + record.value());
                 }
 
+
+            }
+            if(recordCounts > 0){
+                BulkResponse bulkItemResponses = client.bulk(bulkRequest, RequestOptions.DEFAULT);
+
+                logger.info("Committing offsets...");
+                consumer.commitSync();
+                logger.info("Offsets have been committed");
+                Thread.sleep(1000);
             }
 
-            logger.info("Committing offsets...");
-            consumer.commitSync();
-            logger.info("Offsets have been committed");
-            Thread.sleep(1000);
 
 
         }
