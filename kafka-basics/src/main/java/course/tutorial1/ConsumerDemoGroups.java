@@ -1,4 +1,4 @@
-package com.kafka.course.tutorial1;
+package course.tutorial1;
 
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -12,7 +12,7 @@ import java.time.Duration;
 import java.util.Collections;
 import java.util.Properties;
 
-public class ConsumerDemo {
+public class ConsumerDemoGroups {
     public static void main(String[] args) {
         Logger logger = LoggerFactory.getLogger(ConsumerDemo.class.getName());
         String bootstrapServers = "127.0.0.1:9092";
@@ -35,16 +35,12 @@ public class ConsumerDemo {
 
         //poll for new data
         while(true){
-           ConsumerRecords<String, String> records =
-                   consumer.poll(Duration.ofMillis(100));
-           for(ConsumerRecord<String, String> record : records){
-               logger.info("Key: " + record.key() + ", Value: " + record.value());
-               logger.info("Partition: " + record.partition() + ", Offset: " + record.offset());
-           }
+            ConsumerRecords<String, String> records =
+                    consumer.poll(Duration.ofMillis(100));
+            for(ConsumerRecord<String, String> record : records){
+                logger.info("Key: " + record.key() + ", Value: " + record.value());
+                logger.info("Partition: " + record.partition() + ", Offset: " + record.offset());
+            }
         }
-
-
-
-
     }
 }
